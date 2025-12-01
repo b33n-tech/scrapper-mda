@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 
-BASE_URL = "https://www.strasbourg.eu/annuaire-associations?p_p_id=listing_WAR_listingportlet&p_p_lifecycle=0&p_p_state=normal&p_p_mode=view&_listing_WAR_listingportlet_delta=10&_listing_WAR_listingportlet_resetCur=false&_listing_WAR_listingportlet_cur={}"
+BASE_URL = "https://www.mdas.org/annuaire/"
 
 # ------------------------
 # SCRAPER POUR 1 FICHE
