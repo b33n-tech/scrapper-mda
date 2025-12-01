@@ -4,90 +4,63 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 
-BASE_URL = "https://www.mdas.org/annuaire/"
+BASE = "https://www.mdas.org/annuaire/page/{page}/"
 
-# ------------------------
-# SCRAPER POUR 1 FICHE
-# ------------------------
-def parse_asso_block(block):
-    data = {}
+def parse_page(html):
+    soup = BeautifulSoup(html, "lxml")
+    content = soup.find("div", {"id":"content"}) or soup  # ajuster si id différent
+    text = content.get_text("\n", strip=True)
+    lines = text.split("\n")
+    assos = []
+    curr = None
 
-    # Nom
-    title_tag = block.find("h3")
-    data["nom"] = title_tag.get_text(strip=True) if title_tag else None
+    for line in lines:
+        # détecter début asso : ligne commençant par '### '
+        if line.startswith("### "):
+            if curr:
+                assos.append(curr)
+            curr = {"nom": line[4:].strip()}
+            continue
+        if curr is None:
+            continue
 
-    # Catégorie / sous-titre
-    subtitle = block.find("div", class_="subtitle")
-    data["categorie"] = subtitle.get_text(strip=True) if subtitle else None
+        # catégories
+        # si ligne en MAJUSCULES avec un '-'
+        if " - " in line and line.upper() == line:
+            curr["categorie"] = line.strip()
+            continue
+        # site internet
+        if line.startswith("Site internet"):
+            parts = line.split(":",1)
+            if len(parts)>1:
+                curr["site"] = parts[1].strip()
+            continue
+        # coordonnées / contact / adresse / email / téléphone
+        if "Tél" in line or "téléphone" in line or "@" in line or any(c.isdigit() for c in line):
+            curr.setdefault("coordonnees", []).append(line.strip())
+            continue
 
-    # Description
-    desc = block.find("div", class_="description")
-    data["description"] = desc.get_text(" ", strip=True) if desc else None
+    if curr:
+        assos.append(curr)
+    return assos
 
-    # Bloc détails (caché derrière "+")
-    details = block.find("div", class_="contentDetails")
-    if details:
-        text = details.get_text("\n", strip=True)
-
-        # extraction simple par mots clés
-        for line in text.split("\n"):
-            if "@" in line:
-                data["email"] = line.strip()
-            if "www" in line or "http" in line:
-                data["site web"] = line.strip()
-            if any(c.isdigit() for c in line) and len(line) > 6:
-                if "Tel" in line or "tél" in line.lower():
-                    data["telephone"] = line.strip()
-                else:
-                    data.setdefault("adresse", line.strip())
-
-    return data
-
-# ------------------------
-# SCRAPER GLOBAL
-# ------------------------
-def scrape_annuaire(nb_pages):
-    results = []
-
-    for page in range(1, nb_pages + 1):
-        url = BASE_URL.format(page)
-        st.write(f"Scraping page {page}/{nb_pages}…")
-        
+def scrape(n_pages):
+    all_assos = []
+    for p in range(1, n_pages+1):
+        url = BASE.format(page=p)
         r = requests.get(url)
         if r.status_code != 200:
-            st.error(f"Erreur page {page} : {r.status_code}")
+            st.error(f"Erreur page {p}: {r.status_code}")
             continue
+        assos = parse_page(r.text)
+        st.write(f"Page {p}: {len(assos)} associations trouvées")
+        all_assos.extend(assos)
+        time.sleep(0.2)
+    return pd.DataFrame(all_assos)
 
-        soup = BeautifulSoup(r.text, "lxml")
-
-        blocks = soup.find_all("div", class_="resultsItem")
-        if not blocks:
-            st.warning(f"Aucun bloc trouvé page {page} (structure peut avoir changé).")
-            continue
-
-        for b in blocks:
-            info = parse_asso_block(b)
-            results.append(info)
-
-        time.sleep(0.3)  # éviter de spammer le site
-
-    return pd.DataFrame(results)
-
-
-# ------------------------
-# STREAMLIT UI
-# ------------------------
-st.title("📚 Scraper Annuaire des Associations – Strasbourg")
-
-st.write("Entre combien de pages scraper (max ~154)")
-
-nb_pages = st.number_input("Pages à scraper", min_value=1, max_value=154, value=5)
-
-if st.button("🚀 Lancer le scraping"):
-    df = scrape_annuaire(nb_pages)
-    st.success(f"Scraping terminé : {len(df)} associations trouvées.")
-
+st.title("Scraper MDAS annuaire")
+n = st.number_input("Pages à scraper", min_value=1, max_value=154, value=5)
+if st.button("Go"):
+    df = scrape(n)
     st.dataframe(df)
-
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Télécharger CSV", csv, "associations.csv", "text/csv")
+    st.download_button("Télécharger CSV", df.to_csv(index=False), "mdas_assos.csv", "text/csv")
